@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Volume Manager FF",
+  "version": "2.0.0",
+  "description": "Control any tab's volume separately",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+    "host_permissions": [ 
+    "http://*/*",
+    "https://*/*"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "volume-manager@local",
+      "strict_min_version": "109.0"
+    }
+  },
+  "action": {
+    "default_icon": "icon.png",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "scripts": ["background.ts"]
+  },
+  "icons": {
+    "512": "icon.png"
+  },
+  
+  "content_scripts": [{
+   "matches": ["<all_urls>"],
+   "js": ["content.ts"]
+}]
+}

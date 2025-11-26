@@ -1,0 +1,33 @@
+{
+    "name": "chrome-volume-manager",
+    "version": "2.0.1",
+    "description": "Chrome extension to control any tab's volume separately",
+    "targets": {
+        "webext-dev": {
+            "sourceMap": {
+                "inline": true,
+                "inlineSources": true
+            }
+        },
+        "webext-prod": {
+            "sourceMap": {
+                "inline": false,
+                "inlineSources": false
+            }
+        }
+    },
+    "scripts": {
+        "start": "parcel watch src/manifest.json --host localhost --target webext-dev --config @parcel/config-webextension",
+        "build": "parcel build src/manifest.json --config @parcel/config-webextension --target webext-prod"
+    },
+    "devDependencies": {
+        "@parcel/config-webextension": "^2.10.3",
+        "@parcel/transformer-sass": "^2.10.3",
+        "@types/chrome": "^0.0.261",
+        "parcel": "^2.10.3",
+        "typescript": "^5.2.2"
+    },
+    "dependencies": {
+        "@material/web": "^1.0.1"
+    }
+}
