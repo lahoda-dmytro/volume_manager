@@ -27,11 +27,6 @@ function hookElement(element: MediaElementWithSource) {
     if (!audioCtx || !gainNode) return;
 
     try {
-        // Try to set crossOrigin to anonymous to avoid CORS issues with some CDNs
-        if (!element.crossOrigin) {
-            element.crossOrigin = "anonymous";
-        }
-
         const source = audioCtx.createMediaElementSource(element);
         source.connect(gainNode);
         element._source = source;
