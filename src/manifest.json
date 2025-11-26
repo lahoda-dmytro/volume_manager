@@ -15,8 +15,10 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "volume-manager@local",
-      "strict_min_version": "109.0"
-    }
+        "data_collection_permissions": {
+          "required": ["none"]
+        }
+      }
   },
   "action": {
     "default_icon": "icon.png",
