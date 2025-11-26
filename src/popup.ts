@@ -21,7 +21,6 @@ function getStorageKey(url: string): string {
 
 (async () => {
   const tab = await getActiveTab();
-  chrome.action.setBadgeBackgroundColor({ color: '#6d6d6d', tabId: tab.id });
   if (!tab || !tab.id || !tab.url) return;
 
   const storageKey = getStorageKey(tab.url);
@@ -49,7 +48,6 @@ slider.addEventListener('input', async () => {
     await chrome.tabs.sendMessage(tab.id, msg).catch(() => { });
 
     const text = String(Math.round(value * 100));
-    chrome.action.setBadgeText({ text, tabId: tab.id });
-    chrome.action.setBadgeBackgroundColor({ color: '#6d6d6d', tabId: tab.id });
+    chrome.action.setBadgeText({ text, tabId: tab.id});
   }
 });

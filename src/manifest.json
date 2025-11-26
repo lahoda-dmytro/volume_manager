@@ -8,7 +8,7 @@
     "scripting",
     "storage"
   ],
-    "host_permissions": [ 
+  "host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
@@ -23,13 +23,22 @@
     "default_popup": "popup.html"
   },
   "background": {
-    "scripts": ["background.ts"]
+    "scripts": [
+      "background.ts"
+    ]
   },
   "icons": {
     "512": "icon.png"
   },
-  "content_scripts": [{
-   "matches": ["<all_urls>"],
-   "js": ["content.ts"]
-}]
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.ts"
+      ],
+      "css": []
+    }
+  ]
 }
