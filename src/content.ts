@@ -32,15 +32,12 @@ function isCrossOrigin(url: string): boolean {
 }
 
 function shouldForceFallback(): boolean {
-    // TikTok uses blob URLs that look same-origin but are backed by tainted resources
-    // Attempting to hook them results in silence, so we force fallback
     return window.location.hostname.includes('tiktok.com');
 }
 
 function hookElement(element: MediaElementWithSource) {
     if (element._hooked || element._fallbackMode) return;
 
-    // Check for forced fallback domains (like TikTok)
     if (shouldForceFallback()) {
         console.log("Volume Manager: Forcing fallback mode for this domain.");
         element._fallbackMode = true;
@@ -48,7 +45,6 @@ function hookElement(element: MediaElementWithSource) {
         return;
     }
 
-    // Check for unsafe cross-origin content
     if (element.currentSrc && isCrossOrigin(element.currentSrc) && element.crossOrigin !== "anonymous") {
         console.warn("Volume Manager: Element is cross-origin without CORS. Falling back to native volume control.", element);
         element._fallbackMode = true;
@@ -67,7 +63,6 @@ function hookElement(element: MediaElementWithSource) {
         console.log("Volume Manager: Hooked element", element);
     } catch (e) {
         console.warn("Volume Manager: Failed to hook element (likely CORS)", e);
-        // Fallback if hooking fails
         element._fallbackMode = true;
         element.volume = Math.min(currentVolume, 1);
     }
@@ -78,7 +73,6 @@ function hookAllMediaElements() {
     mediaElements.forEach((el) => hookElement(el as MediaElementWithSource));
 }
 
-// 1. MutationObserver for DOM changes
 const observer = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
@@ -97,29 +91,24 @@ observer.observe(document.body, {
     subtree: true
 });
 
-// 2. Monkey patch play() to catch elements created in memory
 const originalPlay = HTMLMediaElement.prototype.play;
 HTMLMediaElement.prototype.play = function () {
     hookElement(this as MediaElementWithSource);
     return originalPlay.apply(this, arguments as any);
 };
 
-// 3. Periodic check for stragglers (aggressive fallback)
 setInterval(hookAllMediaElements, 2000);
 
-// Initial hook
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', hookAllMediaElements);
 } else {
     hookAllMediaElements();
 }
 
-// Listen for messages
 chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
     if (message.msg === messageType.setVolume) {
         currentVolume = message.volume;
 
-        // Update Web Audio Gain
         initAudioContext();
         if (gainNode) {
             if (currentVolume === 0) {
@@ -129,16 +118,11 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             }
         }
 
-        // Update Fallback Elements
         const mediaElements = document.querySelectorAll('audio, video');
         mediaElements.forEach((el) => {
             const element = el as MediaElementWithSource;
             if (element._fallbackMode || !element._hooked) {
-                // For fallback elements, we can only set volume up to 1.0 (100%)
                 element.volume = Math.min(currentVolume, 1);
-            } else {
-                // For hooked elements, ensure native volume is 1 so GainNode handles the rest
-                element.volume = 1;
             }
         });
     }
