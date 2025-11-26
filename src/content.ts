@@ -39,14 +39,12 @@ function hookElement(element: MediaElementWithSource) {
     if (element._hooked || element._fallbackMode) return;
 
     if (shouldForceFallback()) {
-        console.log("Volume Manager: Forcing fallback mode for this domain.");
         element._fallbackMode = true;
         element.volume = Math.min(currentVolume, 1);
         return;
     }
 
     if (element.currentSrc && isCrossOrigin(element.currentSrc) && element.crossOrigin !== "anonymous") {
-        console.warn("Volume Manager: Element is cross-origin without CORS. Falling back to native volume control.", element);
         element._fallbackMode = true;
         element.volume = Math.min(currentVolume, 1);
         return;
@@ -60,9 +58,7 @@ function hookElement(element: MediaElementWithSource) {
         source.connect(gainNode);
         element._source = source;
         element._hooked = true;
-        console.log("Volume Manager: Hooked element", element);
     } catch (e) {
-        console.warn("Volume Manager: Failed to hook element (likely CORS)", e);
         element._fallbackMode = true;
         element.volume = Math.min(currentVolume, 1);
     }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Volume Manager FF",
-  "version": "2.0.0",
-  "description": "Control any tab's volume separately",
+  "name": "volume manager",
+  "version": "1.0.0",
+  "description": "control any tab's volume separately",
   "permissions": [
     "activeTab",
     "scripting",
@@ -28,7 +28,6 @@
   "icons": {
     "512": "icon.png"
   },
-  
   "content_scripts": [{
    "matches": ["<all_urls>"],
    "js": ["content.ts"]
