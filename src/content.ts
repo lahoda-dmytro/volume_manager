@@ -48,6 +48,12 @@ function shouldForceFallback(): boolean {
     return window.location.hostname.includes('tiktok.com') || window.location.hostname.includes('meet.google.com');
 }
 
+function shouldLockVolume(): boolean {
+    // Only lock volume for Google Meet because it aggressively fights back
+    // TikTok works better with "Last One Wins" (no lock)
+    return window.location.hostname.includes('meet.google.com');
+}
+
 function lockElement(element: MediaElementWithSource) {
     if (element._locked) return;
 
@@ -81,8 +87,10 @@ function hookElement(element: MediaElementWithSource) {
         element._fallbackMode = true;
         element._hooked = true; // Mark as hooked so we don't retry
 
-        // Lock the volume property so the site can't fight us
-        lockElement(element);
+        // Only lock if specifically required (Meet)
+        if (shouldLockVolume()) {
+            lockElement(element);
+        }
 
         // Apply initial volume
         applyVolume(element, Math.min(currentVolume, 1));
@@ -101,7 +109,9 @@ function hookElement(element: MediaElementWithSource) {
         // Fallback if hooking fails
         element._fallbackMode = true;
         element._hooked = true;
-        lockElement(element);
+        if (shouldLockVolume()) {
+            lockElement(element);
+        }
         applyVolume(element, Math.min(currentVolume, 1));
     }
 }
@@ -149,10 +159,13 @@ setInterval(() => {
         }
 
         if (element._fallbackMode) {
-            // Ensure lock is applied (in case element was recreated or lock removed)
-            lockElement(element);
-            // Force volume again just in case
-            applyVolume(element, Math.min(currentVolume, 1));
+            // Only enforce lock/volume if it SHOULD be locked (Meet)
+            if (shouldLockVolume()) {
+                lockElement(element);
+                applyVolume(element, Math.min(currentVolume, 1));
+            }
+            // For TikTok (not locked), we do NOT enforce volume here.
+            // This allows the user to change it via the native slider without it jumping back.
         }
     });
 }, 1000);
