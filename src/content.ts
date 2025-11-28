@@ -4,11 +4,24 @@ interface MediaElementWithSource extends HTMLMediaElement {
     _source?: MediaElementAudioSourceNode;
     _hooked?: boolean;
     _fallbackMode?: boolean;
+    _locked?: boolean;
 }
 
 let audioCtx: AudioContext | null = null;
 let gainNode: GainNode | null = null;
 let currentVolume = 1;
+
+// Capture native volume setter/getter to bypass our own lock
+const nativeVolumeSetter = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume')?.set;
+const nativeVolumeGetter = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume')?.get;
+
+function applyVolume(element: HTMLMediaElement, volume: number) {
+    if (nativeVolumeSetter) {
+        nativeVolumeSetter.call(element, volume);
+    } else {
+        element.volume = volume;
+    }
+}
 
 function initAudioContext() {
     if (!audioCtx) {
@@ -32,21 +45,47 @@ function isCrossOrigin(url: string): boolean {
 }
 
 function shouldForceFallback(): boolean {
-    return window.location.hostname.includes('tiktok.com');
+    return window.location.hostname.includes('tiktok.com') || window.location.hostname.includes('meet.google.com');
+}
+
+function lockElement(element: MediaElementWithSource) {
+    if (element._locked) return;
+
+    try {
+        Object.defineProperty(element, 'volume', {
+            get() {
+                // Return the actual volume (or what the site expects if we wanted to lie, but actual is fine)
+                return nativeVolumeGetter ? nativeVolumeGetter.call(this) : 1;
+            },
+            set(value) {
+                // IGNORE attempts by the site to set volume
+                // We only allow changes via applyVolume (which uses the native setter directly)
+                // console.log('Blocked site from setting volume to:', value);
+            },
+            configurable: true
+        });
+        element._locked = true;
+    } catch (e) {
+        console.warn("Volume Manager: Failed to lock element", e);
+    }
 }
 
 function hookElement(element: MediaElementWithSource) {
-    if (element._hooked || element._fallbackMode) return;
+    if (element._hooked) return;
 
-    if (shouldForceFallback()) {
-        element._fallbackMode = true;
-        element.volume = Math.min(currentVolume, 1);
-        return;
-    }
+    // Check for forced fallback domains (TikTok, Meet)
+    // We also check for cross-origin without CORS
+    const isUnsafe = (element.currentSrc && isCrossOrigin(element.currentSrc) && element.crossOrigin !== "anonymous");
 
-    if (element.currentSrc && isCrossOrigin(element.currentSrc) && element.crossOrigin !== "anonymous") {
+    if (shouldForceFallback() || isUnsafe) {
         element._fallbackMode = true;
-        element.volume = Math.min(currentVolume, 1);
+        element._hooked = true; // Mark as hooked so we don't retry
+
+        // Lock the volume property so the site can't fight us
+        lockElement(element);
+
+        // Apply initial volume
+        applyVolume(element, Math.min(currentVolume, 1));
         return;
     }
 
@@ -59,8 +98,11 @@ function hookElement(element: MediaElementWithSource) {
         element._source = source;
         element._hooked = true;
     } catch (e) {
+        // Fallback if hooking fails
         element._fallbackMode = true;
-        element.volume = Math.min(currentVolume, 1);
+        element._hooked = true;
+        lockElement(element);
+        applyVolume(element, Math.min(currentVolume, 1));
     }
 }
 
@@ -93,7 +135,27 @@ HTMLMediaElement.prototype.play = function () {
     return originalPlay.apply(this, arguments as any);
 };
 
-setInterval(hookAllMediaElements, 2000);
+setInterval(() => {
+    hookAllMediaElements();
+
+    // Enforce volume for fallback elements
+    const mediaElements = document.querySelectorAll('audio, video');
+    mediaElements.forEach((el) => {
+        const element = el as MediaElementWithSource;
+
+        // Enforce mute if volume is 0
+        if (currentVolume === 0) {
+            element.muted = true;
+        }
+
+        if (element._fallbackMode) {
+            // Ensure lock is applied (in case element was recreated or lock removed)
+            lockElement(element);
+            // Force volume again just in case
+            applyVolume(element, Math.min(currentVolume, 1));
+        }
+    });
+}, 1000);
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', hookAllMediaElements);
@@ -117,9 +179,18 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
         const mediaElements = document.querySelectorAll('audio, video');
         mediaElements.forEach((el) => {
             const element = el as MediaElementWithSource;
-            if (element._fallbackMode || !element._hooked) {
-                element.volume = Math.min(currentVolume, 1);
+
+            // Force mute if volume is 0
+            if (currentVolume === 0) {
+                element.muted = true;
+            } else {
+                element.muted = false;
             }
+
+            if (element._fallbackMode) {
+                applyVolume(element, Math.min(currentVolume, 1));
+            }
+            // For hooked elements (Web Audio), we do nothing here (gainNode handles it)
         });
     }
 });

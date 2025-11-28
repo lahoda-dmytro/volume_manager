@@ -25,7 +25,7 @@ function getStorageKey(url: string): string {
 
   const storageKey = getStorageKey(tab.url);
   const storedData = await chrome.storage.local.get([storageKey]);
-  const storedVolume = storedData[storageKey] || 1;
+  const storedVolume = storedData[storageKey] !== undefined ? storedData[storageKey] : 1;
 
   const msgSet: Message = { msg: messageType.setVolume, volume: storedVolume };
   await chrome.tabs.sendMessage(tab.id, msgSet).catch(() => { });
@@ -48,6 +48,6 @@ slider.addEventListener('input', async () => {
     await chrome.tabs.sendMessage(tab.id, msg).catch(() => { });
 
     const text = String(Math.round(value * 100));
-    chrome.action.setBadgeText({ text, tabId: tab.id});
+    chrome.action.setBadgeText({ text, tabId: tab.id });
   }
 });
