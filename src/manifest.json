@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "volume manager",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "control any tab's volume separately",
   "permissions": [
     "activeTab",
@@ -40,6 +40,7 @@
       "js": [
         "content.ts"
       ],
+      "run_at": "document_start",
       "css": []
     }
   ]

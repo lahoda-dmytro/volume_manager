@@ -1,209 +1,137 @@
 import { Message, messageType } from './types';
 
-interface MediaElementWithSource extends HTMLMediaElement {
-    _source?: MediaElementAudioSourceNode;
-    _hooked?: boolean;
-    _fallbackMode?: boolean;
-    _locked?: boolean;
-}
+// @ts-ignore
+const runtime = (typeof chrome !== 'undefined' ? chrome : browser).runtime;
 
-let audioCtx: AudioContext | null = null;
-let gainNode: GainNode | null = null;
-let currentVolume = 1;
+let targetVolume: number = 1;
+const managedElements = new WeakSet<HTMLMediaElement>();
 
-// Capture native volume setter/getter to bypass our own lock
-const nativeVolumeSetter = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume')?.set;
-const nativeVolumeGetter = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume')?.get;
-
-function applyVolume(element: HTMLMediaElement, volume: number) {
-    if (nativeVolumeSetter) {
-        nativeVolumeSetter.call(element, volume);
-    } else {
-        element.volume = volume;
+// Логер (лише для Google Meet)
+function log(msg: string, ...args: any[]) {
+    if (window.location.hostname.includes('google.com')) {
+        console.log(`[VolumeManager] ${msg}`, ...args);
     }
 }
 
-function initAudioContext() {
-    if (!audioCtx) {
-        audioCtx = new AudioContext();
-        gainNode = audioCtx.createGain();
-        gainNode.connect(audioCtx.destination);
-        gainNode.gain.value = currentVolume;
-    } else if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
+// === ГОЛОВНА ЛОГІКА КОНТРОЛЮ ===
+
+function enforceVolume(element: HTMLMediaElement) {
+    // Якщо це "мертвий" елемент, не чіпаємо
+    if (!element) return;
+
+    // Жорстка перевірка різниці
+    if (Math.abs(element.volume - targetVolume) > 0.001) {
+        element.volume = targetVolume;
+    }
+
+    // Синхронізація Mute
+    if (targetVolume === 0 && !element.muted) {
+        element.muted = true;
+    } else if (targetVolume > 0 && element.muted) {
+        // Увага: Meet може м'ютити сам, але ми пріоритетніші, якщо користувач виставив звук
+        element.muted = false;
     }
 }
 
-function isCrossOrigin(url: string): boolean {
-    if (!url) return false;
-    try {
-        const origin = new URL(url).origin;
-        return origin !== window.location.origin;
-    } catch (e) {
-        return false;
-    }
-}
+function hookElement(element: HTMLMediaElement) {
+    if (managedElements.has(element)) return;
 
-function shouldForceFallback(): boolean {
-    return window.location.hostname.includes('tiktok.com') || window.location.hostname.includes('meet.google.com');
-}
+    log('HOOKED new audio source:', element);
+    managedElements.add(element);
 
-function shouldLockVolume(): boolean {
-    // Only lock volume for Google Meet because it aggressively fights back
-    // TikTok works better with "Last One Wins" (no lock)
-    return window.location.hostname.includes('meet.google.com');
-}
+    // 1. Одразу застосовуємо гучність
+    enforceVolume(element);
 
-function lockElement(element: MediaElementWithSource) {
-    if (element._locked) return;
-
-    try {
-        Object.defineProperty(element, 'volume', {
-            get() {
-                // Return the actual volume (or what the site expects if we wanted to lie, but actual is fine)
-                return nativeVolumeGetter ? nativeVolumeGetter.call(this) : 1;
-            },
-            set(value) {
-                // IGNORE attempts by the site to set volume
-                // We only allow changes via applyVolume (which uses the native setter directly)
-                // console.log('Blocked site from setting volume to:', value);
-            },
-            configurable: true
-        });
-        element._locked = true;
-    } catch (e) {
-        console.warn("Volume Manager: Failed to lock element", e);
-    }
-}
-
-function hookElement(element: MediaElementWithSource) {
-    if (element._hooked) return;
-
-    // Check for forced fallback domains (TikTok, Meet)
-    // We also check for cross-origin without CORS
-    const isUnsafe = (element.currentSrc && isCrossOrigin(element.currentSrc) && element.crossOrigin !== "anonymous");
-
-    if (shouldForceFallback() || isUnsafe) {
-        element._fallbackMode = true;
-        element._hooked = true; // Mark as hooked so we don't retry
-
-        // Only lock if specifically required (Meet)
-        if (shouldLockVolume()) {
-            lockElement(element);
-        }
-
-        // Apply initial volume
-        applyVolume(element, Math.min(currentVolume, 1));
-        return;
-    }
-
-    initAudioContext();
-    if (!audioCtx || !gainNode) return;
-
-    try {
-        const source = audioCtx.createMediaElementSource(element);
-        source.connect(gainNode);
-        element._source = source;
-        element._hooked = true;
-    } catch (e) {
-        // Fallback if hooking fails
-        element._fallbackMode = true;
-        element._hooked = true;
-        if (shouldLockVolume()) {
-            lockElement(element);
-        }
-        applyVolume(element, Math.min(currentVolume, 1));
-    }
-}
-
-function hookAllMediaElements() {
-    const mediaElements = document.querySelectorAll('audio, video');
-    mediaElements.forEach((el) => hookElement(el as MediaElementWithSource));
-}
-
-const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-            if (node instanceof HTMLMediaElement) {
-                hookElement(node as MediaElementWithSource);
-            } else if (node instanceof HTMLElement) {
-                const mediaElements = node.querySelectorAll('audio, video');
-                mediaElements.forEach((el) => hookElement(el as MediaElementWithSource));
-            }
-        });
+    // 2. Слухаємо будь-які спроби змінити гучність
+    element.addEventListener('volumechange', (e) => {
+        if (e.isTrusted) enforceVolume(element);
     });
+
+    // 3. Інші події життєвого циклу
+    element.addEventListener('play', () => enforceVolume(element));
+    element.addEventListener('loadedmetadata', () => enforceVolume(element));
+    element.addEventListener('durationchange', () => enforceVolume(element)); // Часто спрацьовує при стрімах
+}
+
+// === ЯДЕРНИЙ ПОШУК (Shadow DOM + Recursion) ===
+
+function scanDOM(root: Document | ShadowRoot | HTMLElement) {
+    // 1. Шукаємо звичайні теги
+    const elements = root.querySelectorAll('audio, video');
+    elements.forEach(el => hookElement(el as HTMLMediaElement));
+
+    // 2. Рекурсивно ліземо в Shadow Roots усіх елементів
+    const allNodes = root.querySelectorAll('*');
+    allNodes.forEach((node) => {
+        if (node.shadowRoot) {
+            scanDOM(node.shadowRoot);
+        }
+    });
+}
+
+// === ПЕРЕХОПЛЕННЯ API (Monkey Patching) ===
+// Це гарантує, що ми знайдемо елемент, навіть якщо його немає в DOM
+
+function hijackAPI() {
+    // 1. Перехоплюємо document.createElement('audio'/'video')
+    const originalCreateElement = document.createElement;
+    document.createElement = function(tagName: string, options?: ElementCreationOptions) {
+        const element = originalCreateElement.call(document, tagName, options);
+        if (tagName.toLowerCase() === 'audio' || tagName.toLowerCase() === 'video') {
+            hookElement(element as HTMLMediaElement);
+        }
+        return element;
+    } as any;
+
+    // 2. Перехоплюємо new Audio()
+    const originalAudio = window.Audio;
+    window.Audio = function(src?: string) {
+        const element = new originalAudio(src);
+        hookElement(element);
+        return element;
+    } as any;
+
+    // Відновлюємо прототип (щоб instanceof працював)
+    window.Audio.prototype = originalAudio.prototype;
+}
+
+// --- ІНІЦІАЛІЗАЦІЯ ---
+
+// Запускаємо перехоплення API одразу
+hijackAPI();
+
+// Спостерігач за DOM (включно з Shadow DOM, наскільки це можливо через сканування)
+const observer = new MutationObserver(() => {
+    scanDOM(document);
 });
 
-observer.observe(document.body, {
+observer.observe(document.documentElement, {
     childList: true,
     subtree: true
 });
 
-const originalPlay = HTMLMediaElement.prototype.play;
-HTMLMediaElement.prototype.play = function () {
-    hookElement(this as MediaElementWithSource);
-    return originalPlay.apply(this, arguments as any);
-};
-
+// Інтервал для підстраховки (сканує все кожну секунду)
 setInterval(() => {
-    hookAllMediaElements();
-
-    // Enforce volume for fallback elements
-    const mediaElements = document.querySelectorAll('audio, video');
-    mediaElements.forEach((el) => {
-        const element = el as MediaElementWithSource;
-
-        // Enforce mute if volume is 0
-        if (currentVolume === 0) {
-            element.muted = true;
-        }
-
-        if (element._fallbackMode) {
-            // Only enforce lock/volume if it SHOULD be locked (Meet)
-            if (shouldLockVolume()) {
-                lockElement(element);
-                applyVolume(element, Math.min(currentVolume, 1));
-            }
-            // For TikTok (not locked), we do NOT enforce volume here.
-            // This allows the user to change it via the native slider without it jumping back.
-        }
-    });
+    scanDOM(document);
 }, 1000);
 
+// Початкове сканування
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', hookAllMediaElements);
+    document.addEventListener('DOMContentLoaded', () => scanDOM(document));
 } else {
-    hookAllMediaElements();
+    scanDOM(document);
 }
 
-chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+// Обробка повідомлень
+runtime.onMessage.addListener((message: Message) => {
     if (message.msg === messageType.setVolume) {
-        currentVolume = message.volume;
+        log('Global volume set to:', message.volume);
+        targetVolume = message.volume;
 
-        initAudioContext();
-        if (gainNode) {
-            if (currentVolume === 0) {
-                gainNode.gain.value = 0;
-            } else {
-                gainNode.gain.value = currentVolume;
-            }
-        }
+        // Оновлюємо все, що знайшли раніше
+        scanDOM(document);
 
-        const mediaElements = document.querySelectorAll('audio, video');
-        mediaElements.forEach((el) => {
-            const element = el as MediaElementWithSource;
-
-            // Force mute if volume is 0
-            if (currentVolume === 0) {
-                element.muted = true;
-            } else {
-                element.muted = false;
-            }
-
-            if (element._fallbackMode) {
-                applyVolume(element, Math.min(currentVolume, 1));
-            }
-            // For hooked elements (Web Audio), we do nothing here (gainNode handles it)
-        });
+        // Додатково проходимось по нашому кешу (бо елементи можуть бути від'єднані від DOM)
+        // На жаль, WeakSet не можна перебрати, тому ми покладаємось на scanDOM і події
     }
 });

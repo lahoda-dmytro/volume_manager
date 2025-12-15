@@ -25,16 +25,23 @@ function getStorageKey(url: string): string {
 
   const storageKey = getStorageKey(tab.url);
   const storedData = await chrome.storage.local.get([storageKey]);
+  // За замовчуванням 1 (100%)
   const storedVolume = storedData[storageKey] !== undefined ? storedData[storageKey] : 1;
 
+  // Надсилаємо збережену гучність на сторінку
   const msgSet: Message = { msg: messageType.setVolume, volume: storedVolume };
-  await chrome.tabs.sendMessage(tab.id, msgSet).catch(() => { });
+  await chrome.tabs.sendMessage(tab.id, msgSet).catch(() => {
+    // Якщо контент-скрипт ще не завантажився або помилка - ігноруємо
+  });
 
+  // Встановлюємо значення слайдера (0-100)
   slider.value = String(storedVolume * 100);
   slider.style.opacity = '1';
 })();
 
 slider.addEventListener('input', async () => {
+  // slider.value тепер від 0 до 100
+  // ділимо на 100, отримуємо від 0.0 до 1.0
   const value = Number(slider.value) / 100;
   const tab = await getActiveTab();
 
@@ -47,7 +54,9 @@ slider.addEventListener('input', async () => {
 
     await chrome.tabs.sendMessage(tab.id, msg).catch(() => { });
 
+    // Бейдж показуємо у відсотках
     const text = String(Math.round(value * 100));
+    // Можна додати "%" для краси, але місця мало
     chrome.action.setBadgeText({ text, tabId: tab.id });
   }
 });
